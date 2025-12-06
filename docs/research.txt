@@ -1,0 +1,477 @@
+Skip to content
+Chat history
+
+
+
+
+You said:
+I want to come up with an approach for Yew/Rust/WASM Web UI development using MCP/Playwright and curl scripts.  I've been struggling with CLI-based AI coding agents being totally unable to repeatedly/reliably select dropdowns for example.  I need a compartmentalized, testable approach. e.g., Instead of building a web UI with modes, tabs, dropdowns, etc, to handle many use cases, I want to have several test UIs, each demonstrating the minimum inputs and controls to test a use-case.  I'm wasting so much time (and context/compress/restarts) just trying to navigate to the screen that is configured for testing a specific UI testcase.  I need an approach that first uses Rust reqwest tests (which can be developed using curl, but I prefer to build a regression test bucket of Rust reqwest API tests) to call the APIs in the correct order that a UI would use.  Then I want testable UI screens that are pre-configured for an exact use case.  This could be separate html files with separate Yew/Rust setup scripts, and/or the use of a local router and routes and &setting=foo type args, that get the UI quickly into the mode needed to run MCP/Playwright tests.  I also would like other approaches and suggestions for simplifying each test and building up a suite of tests.  Another related problem is the sheer size of the context (my application has many moving parts, multiple screens, multiple modes, a proxy to multiple backends, with different APIs and capabilities, running in various states (things down or missing or not yet implemented).  The CLI AI coding agents get very confused about port numbers, apis, architecture, prd, design, etc.  I've provided (too much?) documentation and the AI context quickly gets clutter; then when compressing loses key instructions, loses track of what it is trying to do, loses track of what failed before, and makes the same errors repeatedly.  I need a very clean, concise, subset set up to reduce the context exhaustion frequency, keep the AI agent focused, keep the current goal clear, learn from incorrect/failed attempts, build up checklists, ensure that there are no regressions, and ultimately improve developer velocity.  Help!
+ChatGPT said:
+
+Thought for 18s
+You’re describing two tangled problems:
+
+Tech side – end-to-end testing Yew/Rust/WASM + multi-backend app without losing your mind.
+
+AI side – giving CLI AI agents a small, stable playground so they don’t thrash, forget, and break everything.
+
+I’ll walk through an architecture that addresses both, then show how to use it with MCP/Playwright and reqwest.
+
+0. Requirements (re-stated)
+You want:
+
+Compartmentalized UIs: many tiny, purpose-built Yew test screens instead of one huge “modeful” app.
+
+API-first regression tests: Rust reqwest tests (derived from curl) that encode the “correct order” of calls for each use case.
+
+Deterministic UI entry points: routes / HTML entry files that land the browser directly in the right state for each test.
+
+Automatable UIs: Playwright/MCP scripts that don’t get lost in tabs/dropdowns.
+
+AI-friendly structure: small, focused contexts; explicit goals; checklists; regression safety net; clear ports and APIs.
+
+Non-functionals:
+
+Repeatable, fast on your hardware.
+
+Minimal context needed per scenario.
+
+Easy to extend with new scenarios.
+
+Easy to recover when an AI agent derps.
+
+1. High-Level Architecture
+Think of three layers:
+
+API layer – Rust backend(s) with a clean contract.
+
+Scenario harness layer – small, API-driven use-case scenarios:
+
+Rust reqwest scenario tests (no browser).
+
+Yew “micro-apps” or routes that exercise exactly one scenario.
+
+E2E automation layer – Playwright/MCP scripts bound to those scenarios.
+
+And over all of this, a scenario manifest that’s the single source of truth for:
+
+Scenario ID & description.
+
+Which route/URL loads it.
+
+Which API sequence is expected.
+
+Which test files cover it.
+
+2. Workspace / Repo Layout
+I’d use a Cargo workspace with clear boundaries:
+
+my-app/
+  Cargo.toml                  # [workspace]
+
+  backend/                    # Rust backend(s)
+    src/...
+
+  api-model/                  # Shared request/response types
+    src/lib.rs
+
+  api-tests/                  # reqwest-based scenario tests
+    src/
+      scenarios/
+        s001_basic_login.rs
+        s002_upload_single_file.rs
+        ...
+    tests/
+      integration.rs          # or use tests/ per-scenario
+
+  ui-app/                     # “real” Yew app
+    src/
+      main.rs
+      app.rs
+      routes.rs
+      components/...
+
+  ui-lab/                     # scenario harness UIs
+    src/
+      main.rs                 # router + ?scenario=...
+      scenarios/
+        s001_basic_login.rs
+        s002_upload_single_file.rs
+        ...
+    static/
+      index.html              # maybe shared base with small variants
+
+  e2e/                        # Playwright test suite
+    package.json
+    playwright.config.ts
+    tests/
+      s001_basic_login.spec.ts
+      s002_upload_single_file.spec.ts
+      ...
+
+  docs/
+    scenarios.md              # auto-generated from manifest?
+    ports.md                  # one place for ports
+    architecture.md
+    ai_playbook.md            # how to work with AI agents
+
+  scripts/
+    run_backend.sh
+    run_ui_lab.sh
+    run_api_tests.sh
+    run_e2e.sh
+The key for AI sanity: each directory is a separate “world” with a narrow concern.
+
+3. Layer 1 – API Regression via reqwest
+3.1 Scenario-first mindset
+Instead of “API tests” generically, define scenarios:
+
+S001_BASIC_LOGIN
+
+S002_CREATE_PROJECT
+
+S010_STREAMING_JOB_HAPPY_PATH
+
+S011_STREAMING_JOB_BACKEND_DOWN
+
+Store them somewhere like:
+
+// api-tests/src/scenarios/s001_basic_login.rs
+
+pub async fn run_s001_basic_login(base_url: &str) -> anyhow::Result<()> {
+    // Step 1: health check
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{base_url}/health"))
+        .send()
+        .await?
+        .error_for_status()?;
+
+    // Step 2: login
+    let resp = client
+        .post(format!("{base_url}/login"))
+        .json(&LoginRequest { user: "test".into(), pass: "test".into() })
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let login: LoginResponse = resp.json().await?;
+    assert!(login.session_id.len() > 0);
+
+    // Step 3: fetch settings
+    let settings: Settings = client
+        .get(format!("{base_url}/settings"))
+        .bearer_auth(&login.token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    assert_eq!(settings.mode, "basic");
+    Ok(())
+}
+Then have a small runner:
+
+// api-tests/src/main.rs
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let base_url = std::env::var("API_BASE_URL")
+        .unwrap_or_else(|_| "http://localhost:8080".to_string());
+
+    scenarios::s001_basic_login::run_s001_basic_login(&base_url).await?;
+    Ok(())
+}
+You can:
+
+Move curl commands into comments in each scenario.
+
+Use insta for snapshot testing of JSON if helpful.
+
+Add variations: *_backend_down, *_invalid_input, etc.
+
+Pros
+
+Completely isolates API correctness from UI flakiness.
+
+Gives Playwright tests something known-good to follow.
+
+Easy to run headless in CI.
+
+Risks
+
+If you change APIs frequently, scenarios need maintenance.
+
+Must keep base URLs/ports DRY (hence ports.md & env vars).
+
+4. Layer 2 – UI Scenario Harness (“UI Lab”)
+Your main app is complex; don’t use it for test harness. Build a separate test harness app (ui-lab) that:
+
+Uses the same components, hooks, and API client code where possible.
+
+Provides one route per scenario, pre-configured to a specific mode.
+
+Loads deterministic test data; no extra navigation.
+
+4.1 Simple routing strategy
+Use a tiny router:
+
+// ui-lab/src/main.rs
+fn main() {
+    yew::Renderer::<LabRoot>::new().render();
+}
+
+// ui-lab/src/lab_root.rs
+#[function_component(LabRoot)]
+fn lab_root() -> Html {
+    let location = web_sys::window().unwrap().location();
+    let query = location.search().unwrap_or_default(); // e.g., "?scenario=S001"
+    let scenario_id = parse_scenario_from_query(&query).unwrap_or("S001".to_string());
+
+    html! {
+        <>
+            <header>{ format!("Scenario: {scenario_id}") }</header>
+            {
+                match scenario_id.as_str() {
+                    "S001" => html! { <scenarios::S001BasicLogin /> },
+                    "S002" => html! { <scenarios::S002CreateProject /> },
+                    // ...
+                    _ => html! { <p>{ "Unknown scenario" }</p> },
+                }
+            }
+        </>
+    }
+}
+Each scenario component is self-contained:
+
+// ui-lab/src/scenarios/s001_basic_login.rs
+#[function_component(S001BasicLogin)]
+pub fn s001_basic_login() -> Html {
+    html! {
+      <div data-testid="scenario-s001-root">
+        <LoginForm
+          default_username="test"
+          default_password="test"
+        />
+      </div>
+    }
+}
+Now Playwright (and humans) can go directly to:
+
+http://localhost:8081/lab?scenario=S001
+
+http://localhost:8081/lab?scenario=S010&backendDown=true
+
+4.2 Alternative: multiple entry HTML files
+If you really want separate HTML pages (zero router complexity):
+
+lab-s001.html → loads lab_s001.js which calls render::<S001Root>().
+
+lab-s002.html → loads lab_s002.js, etc.
+
+You can achieve this with multiple bin targets or multiple wasm-bindgen entrypoints.
+
+Pros
+
+Each scenario is literally a different URL/file: super-simple for MCP and Playwright.
+
+No query parsing needed.
+
+Cons
+
+Slightly more complicated build config (multiple WASM bundles).
+
+More places to update if shared code changes.
+
+For AI agents, I’d lean toward the router + ?scenario= option because:
+
+All scenario wiring is in one match in LabRoot.
+
+You can say: “Only edit ui-lab/src/scenarios/s00X_*.rs and the match in lab_root.rs.”
+
+5. Layer 3 – Playwright / MCP Strategy
+5.1 Make the DOM AI-friendly
+Your problems with dropdowns are very common. To help both AI and Playwright:
+
+Give every critical control a data-testid:
+
+<select data-testid="language-select">...</select>
+<button data-testid="submit-btn">Submit</button>
+Avoid over-dynamic IDs or content-dependent locators.
+
+Prefer simple control types where possible:
+
+For tests, you can use radio buttons instead of complex dropdown UIs.
+
+Provide scenario headers:
+
+<h1 data-testid="scenario-title">S001 – Basic Login</h1>
+This gives Playwright and the AI a stable, reliable anchor.
+
+5.2 One Playwright test per scenario
+// e2e/tests/s001_basic_login.spec.ts
+import { test, expect } from '@playwright/test';
+
+test('S001 – basic login happy path', async ({ page }) => {
+  await page.goto('http://localhost:8081/lab?scenario=S001');
+
+  await page.getByTestId('username-input').fill('test');
+  await page.getByTestId('password-input').fill('test');
+  await page.getByTestId('submit-btn').click();
+
+  await expect(page.getByTestId('welcome-message'))
+    .toHaveText(/Welcome, test/i);
+});
+Now the scenario mapping is:
+
+API: api-tests/src/scenarios/s001_basic_login.rs
+
+UI lab: ui-lab/src/scenarios/s001_basic_login.rs
+
+E2E: e2e/tests/s001_basic_login.spec.ts
+
+5.3 MCP usage pattern
+When using an AI coding agent with Playwright MCP:
+
+Provide a tiny, explicit context:
+
+- Goal: fix S001 Playwright test flakiness around dropdown selection.
+- Only modify:
+    e2e/tests/s001_basic_login.spec.ts
+    ui-lab/src/scenarios/s001_basic_login.rs
+- App is served at:
+    UI lab: http://localhost:8081/lab
+    Backend: http://localhost:8080
+- Use data-testid attributes for selectors.
+Add a checklist in the prompt:
+
+Checklist:
+1. Run S001 API regression (api-tests).
+2. Run S001 E2E test via `npm test s001_basic_login`.
+3. If it fails due to selector issues, adjust data-testid or locator.
+4. Re-run test to confirm.
+This keeps the agent out of other ports, modes, and APIs.
+
+6. Managing Context & AI Confusion
+6.1 Keep “system meta” docs small
+Instead of massive design docs, create 3–5 very short references:
+
+docs/ports.md – 1 page max.
+
+docs/apis.md – top-level endpoints only.
+
+docs/scenarios.md – table:
+
+ID	Name	URL	API sequence
+S001	Basic Login	/lab?scenario=S001	health → login → settings
+S002	Create Project	/lab?scenario=S002	login → create_project → list_proj
+...			
+docs/ai_playbook.md – how to work with the repo (for agents).
+
+When starting a new AI session, you paste:
+
+The one scenario you’re working on from scenarios.md.
+
+The relevant file paths.
+
+The current failure/error.
+
+Nothing else.
+
+6.2 Encode “what went wrong” in code, not just chat
+When a test fails due to a specific bug, add comments or even compile-time asserts / test names that capture it:
+
+#[test]
+fn s001_login_rejects_missing_password() {
+    // Regression: previously accepted empty password (bug #123)
+    ...
+}
+Then when you bring the agent back, you say:
+
+“Your goal: fix s001_login_rejects_missing_password which currently fails. Do not modify any other test.”
+
+6.3 Stages for each new feature
+For each new use case:
+
+Define scenario ID & sequence in docs/scenarios.md.
+
+Add reqwest scenario test in api-tests.
+
+Add UI lab scenario (component + route wiring).
+
+Add Playwright test that:
+
+Goes directly to the scenario URL.
+
+Uses data-testid, no deep navigation.
+
+(Optional) Ask AI to improve styling, refactor, etc., but keep tests green.
+
+This gives you a consistent pipeline you can automate with scripts:
+
+./scripts/run_api_tests.sh
+./scripts/run_ui_lab.sh
+./scripts/run_e2e.sh
+7. Other Simplification Ideas
+A few extra knobs you might like:
+
+“AI mode” flag in UI
+When ?ai_mode=1, components:
+
+Replace fancy dropdowns with simple <select>s.
+
+Show extra labels / tooltips to guide Playwright.
+This keeps your “real UI” pretty, but AI sees a simpler DOM.
+
+Backend stubs for UI lab
+For some scenarios, point ui-lab at:
+
+A lightweight stub service on another port.
+
+Or a mock layer compiled only in --features mock_backend.
+This avoids multi-backend flakiness when you only want to test one behavior.
+
+Snapshot UI tests without a browser
+Use wasm-bindgen-test or Yew’s testing helpers to:
+
+Render a component.
+
+Assert that certain text / attributes are present.
+This sits between API tests and Playwright; good for quick regression checks.
+
+8. Putting It All Together
+Here’s the “mental model” pipeline:
+
+API correctness → api-tests (pure Rust reqwest).
+
+UI wiring correctness for a single use case → ui-lab scenario + Yew component tests.
+
+User journey correctness → Playwright scenario test hitting ui-lab.
+
+AI involvement:
+
+Only in one layer at a time.
+
+Only with a small set of files and one scenario.
+
+Always backed by failing tests and a checklist.
+
+If you’d like, next step I can:
+
+Sketch exact Cargo.toml workspace configuration, or
+
+Draft a concrete example for one full scenario (S001) including:
+
+reqwest test,
+
+Yew lab scenario component,
+
+Playwright test,
+
+And a short ai_playbook.md snippet for that scenario.
+
+
+
+No file chosenNo file chosen
+ChatGPT can make mistakes. Check important info.
+
