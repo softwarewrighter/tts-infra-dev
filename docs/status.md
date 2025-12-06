@@ -35,11 +35,10 @@
 
 ### In Progress
 
-- [ ] Convert to Cargo workspace structure
-- [ ] Create core crate (shared types, client, scenarios)
-- [ ] Create cli crate with clap
-- [ ] Create backend crate
-- [ ] Create scripting crate
+- [ ] Create components/ directory structure
+- [ ] Create component workspaces (core, cli, backend, scripting, mocks, tests, web-ui)
+- [ ] Create root scripts (fmt.sh, clippy.sh, build.sh, test.sh, check.sh)
+- [ ] Create core crates (core-types, core-error, core-client, core-scenarios)
 
 ### Blocked
 
@@ -47,12 +46,11 @@ None
 
 ### Next Steps
 
-1. Create workspace Cargo.toml with member crates
-2. Set up core crate with types and client
-3. Set up cli crate with basic commands
-4. Set up backend crate with Axum
-5. Implement GET /health endpoint (port 1100)
-6. Create first scenario (S001) across all three interfaces
+1. Create components/ directory with component workspaces
+2. Create root scripts (fmt.sh, clippy.sh, build.sh, test.sh, check.sh)
+3. Set up core component with crates (core-types, core-error, core-client, core-scenarios)
+4. Verify sw-checklist passes on all components
+5. Implement S001 Basic TTS across all three interfaces
 
 ---
 
@@ -131,6 +129,13 @@ None currently tracked.
 - Reviewed existing research and process documentation
 - Updated architecture for three-interface pattern (CLI, Scripting, Web UI)
 - Changed ports from 808x to 110x range to avoid conflicts
+- Redesigned to component-based physical layout:
+  - components/{backend,cli,core,mocks,scripting,spies,tests,web-ui}/
+  - Each component has Cargo.toml workspace + crates/ subdirectory
+  - Crate structure: crates/<name>/src/{lib.rs, <module>/{mod.rs, files}}
+- Added sw-checklist constraints to design (functions <=25 LOC, modules <=4 funcs, crates <=4 modules)
+- Added rule: no functions in lib.rs or mod.rs (re-exports only)
+- Added root scripts for fmt, clippy, build, test, check across all components
 
 ---
 

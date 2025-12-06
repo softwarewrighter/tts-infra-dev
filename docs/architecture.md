@@ -74,86 +74,328 @@ Every use case can be accomplished through three interfaces:
 - No complex navigation required
 - Direct URL access to scenario state
 
-## Workspace Structure
+## Physical Layout
+
+The project uses a component-based structure with strict limits enforced by `sw-checklist`:
+
+### sw-checklist Constraints
+
+| Metric              | Warn  | Fail  |
+|---------------------|-------|-------|
+| Lines per function  | >25   | >50   |
+| Functions per module| >4    | >7    |
+| Modules per crate   | >4    | >7    |
+
+### Code Organization Rules
+
+1. **No functions in lib.rs or mod.rs** - these files contain only re-exports
+2. **Each .rs file is focused** - one responsibility per file
+3. **Rust Edition 2024** - all crate Cargo.toml files use `edition = "2024"`
+
+### Directory Structure
 
 ```
 tts-infra-dev/
-|-- Cargo.toml                    # [workspace]
 |
-|-- core/                         # Core API library (shared by all interfaces)
-|   +-- src/
-|       |-- lib.rs                # Public API
-|       |-- client.rs             # API client for backend calls
-|       |-- types.rs              # Request/response types
-|       +-- scenarios/            # Scenario implementations
-|           |-- mod.rs
-|           |-- s001_basic_tts.rs
-|           +-- ...
+|-- components/
+|   |
+|   |-- backend/                          # TTS proxy server component
+|   |   |-- Cargo.toml                    # Workspace manifest
+|   |   +-- crates/
+|   |       |-- backend-api/              # HTTP endpoint handlers
+|   |       |   |-- Cargo.toml            # edition = "2024"
+|   |       |   +-- src/
+|   |       |       |-- lib.rs            # Re-exports only
+|   |       |       |-- health/
+|   |       |       |   |-- mod.rs        # Re-exports only
+|   |       |       |   +-- handler.rs    # GET /health implementation
+|   |       |       |-- synthesize/
+|   |       |       |   |-- mod.rs
+|   |       |       |   |-- handler.rs    # POST /synthesize
+|   |       |       |   +-- validation.rs # Input validation
+|   |       |       +-- voices/
+|   |       |           |-- mod.rs
+|   |       |           +-- handler.rs    # GET /voices
+|   |       |
+|   |       |-- backend-proxy/            # Provider proxy logic
+|   |       |   |-- Cargo.toml
+|   |       |   +-- src/
+|   |       |       |-- lib.rs
+|   |       |       |-- selector/
+|   |       |       |   |-- mod.rs
+|   |       |       |   +-- strategy.rs   # Provider selection
+|   |       |       +-- fallback/
+|   |       |           |-- mod.rs
+|   |       |           +-- chain.rs      # Fallback chain
+|   |       |
+|   |       +-- backend-tts/              # TTS provider implementations
+|   |           |-- Cargo.toml
+|   |           +-- src/
+|   |               |-- lib.rs
+|   |               |-- provider/
+|   |               |   |-- mod.rs
+|   |               |   +-- trait_def.rs  # TtsProvider trait
+|   |               |-- openai/
+|   |               |   |-- mod.rs
+|   |               |   +-- client.rs     # OpenAI TTS
+|   |               +-- elevenlabs/
+|   |                   |-- mod.rs
+|   |                   +-- client.rs     # ElevenLabs TTS
+|   |
+|   |-- cli/                              # Command-line interface component
+|   |   |-- Cargo.toml                    # Workspace manifest
+|   |   +-- crates/
+|   |       |-- cli-app/                  # CLI binary
+|   |       |   |-- Cargo.toml
+|   |       |   +-- src/
+|   |       |       |-- main.rs           # Entry point (minimal)
+|   |       |       +-- lib.rs            # Re-exports
+|   |       |
+|   |       +-- cli-commands/             # Command implementations
+|   |           |-- Cargo.toml
+|   |           +-- src/
+|   |               |-- lib.rs
+|   |               |-- health/
+|   |               |   |-- mod.rs
+|   |               |   +-- run.rs        # tts health
+|   |               |-- synthesize/
+|   |               |   |-- mod.rs
+|   |               |   |-- run.rs        # tts synthesize
+|   |               |   +-- args.rs       # Argument parsing
+|   |               +-- voices/
+|   |                   |-- mod.rs
+|   |                   +-- run.rs        # tts voices
+|   |
+|   |-- core/                             # Shared types and client
+|   |   |-- Cargo.toml                    # Workspace manifest
+|   |   +-- crates/
+|   |       |-- core-types/               # Request/response types
+|   |       |   |-- Cargo.toml
+|   |       |   +-- src/
+|   |       |       |-- lib.rs
+|   |       |       |-- request/
+|   |       |       |   |-- mod.rs
+|   |       |       |   +-- synthesize.rs
+|   |       |       +-- response/
+|   |       |           |-- mod.rs
+|   |       |           |-- synthesize.rs
+|   |       |           +-- voice.rs
+|   |       |
+|   |       |-- core-client/              # API client
+|   |       |   |-- Cargo.toml
+|   |       |   +-- src/
+|   |       |       |-- lib.rs
+|   |       |       |-- client/
+|   |       |       |   |-- mod.rs
+|   |       |       |   |-- builder.rs    # Client builder
+|   |       |       |   +-- methods.rs    # API methods
+|   |       |       +-- config/
+|   |       |           |-- mod.rs
+|   |       |           +-- settings.rs   # Client config
+|   |       |
+|   |       |-- core-error/               # Error types
+|   |       |   |-- Cargo.toml
+|   |       |   +-- src/
+|   |       |       |-- lib.rs
+|   |       |       +-- error/
+|   |       |           |-- mod.rs
+|   |       |           |-- api.rs        # API errors
+|   |       |           +-- client.rs     # Client errors
+|   |       |
+|   |       +-- core-scenarios/           # Scenario implementations
+|   |           |-- Cargo.toml
+|   |           +-- src/
+|   |               |-- lib.rs
+|   |               |-- s001/
+|   |               |   |-- mod.rs
+|   |               |   +-- basic_tts.rs
+|   |               +-- s002/
+|   |                   |-- mod.rs
+|   |                   +-- voice_select.rs
+|   |
+|   |-- mocks/                            # Mock implementations
+|   |   |-- Cargo.toml
+|   |   +-- crates/
+|   |       |-- mock-backend/             # Mock backend server
+|   |       |   |-- Cargo.toml
+|   |       |   +-- src/
+|   |       |       |-- lib.rs
+|   |       |       +-- server/
+|   |       |           |-- mod.rs
+|   |       |           +-- handlers.rs
+|   |       |
+|   |       +-- mock-tts/                 # Mock TTS provider
+|   |           |-- Cargo.toml
+|   |           +-- src/
+|   |               |-- lib.rs
+|   |               +-- provider/
+|   |                   |-- mod.rs
+|   |                   +-- fake.rs
+|   |
+|   |-- scripting/                        # Scripting/test interface
+|   |   |-- Cargo.toml
+|   |   +-- crates/
+|   |       +-- scripting-api/            # Programmatic API
+|   |           |-- Cargo.toml
+|   |           +-- src/
+|   |               |-- lib.rs
+|   |               +-- runner/
+|   |                   |-- mod.rs
+|   |                   +-- scenario.rs   # Scenario runner
+|   |
+|   |-- spies/                            # Test spies for verification
+|   |   |-- Cargo.toml
+|   |   +-- crates/
+|   |       +-- spy-api/                  # API call recording
+|   |           |-- Cargo.toml
+|   |           +-- src/
+|   |               |-- lib.rs
+|   |               +-- recorder/
+|   |                   |-- mod.rs
+|   |                   +-- calls.rs      # Call recording
+|   |
+|   |-- tests/                            # Integration tests
+|   |   |-- Cargo.toml
+|   |   +-- crates/
+|   |       |-- test-scenarios/           # Scenario tests
+|   |       |   |-- Cargo.toml
+|   |       |   +-- src/
+|   |       |       |-- lib.rs
+|   |       |       |-- s001/
+|   |       |       |   |-- mod.rs
+|   |       |       |   +-- test.rs
+|   |       |       +-- s002/
+|   |       |           |-- mod.rs
+|   |       |           +-- test.rs
+|   |       |
+|   |       +-- test-harness/             # Test utilities
+|   |           |-- Cargo.toml
+|   |           +-- src/
+|   |               |-- lib.rs
+|   |               +-- fixtures/
+|   |                   |-- mod.rs
+|   |                   +-- setup.rs
+|   |
+|   +-- web-ui/                           # Web UI component
+|       |-- Cargo.toml
+|       +-- crates/
+|           |-- ui-components/            # Shared UI components
+|           |   |-- Cargo.toml
+|           |   +-- src/
+|           |       |-- lib.rs
+|           |       |-- input/
+|           |       |   |-- mod.rs
+|           |       |   +-- text.rs       # Text input component
+|           |       +-- button/
+|           |           |-- mod.rs
+|           |           +-- submit.rs     # Submit button
+|           |
+|           |-- ui-lab/                   # Scenario harness
+|           |   |-- Cargo.toml
+|           |   +-- src/
+|           |       |-- lib.rs
+|           |       |-- main.rs           # WASM entry
+|           |       |-- router/
+|           |       |   |-- mod.rs
+|           |       |   +-- scenario.rs   # Scenario routing
+|           |       +-- scenarios/
+|           |           |-- mod.rs
+|           |           |-- s001.rs
+|           |           +-- s002.rs
+|           |
+|           +-- ui-app/                   # Production UI
+|               |-- Cargo.toml
+|               +-- src/
+|                   |-- lib.rs
+|                   |-- main.rs
+|                   +-- pages/
+|                       |-- mod.rs
+|                       +-- home.rs
 |
-|-- cli/                          # Command-line interface
-|   +-- src/
-|       |-- main.rs               # CLI entry point
-|       +-- commands/             # Subcommands
-|           |-- mod.rs
-|           |-- synthesize.rs     # tts synthesize "Hello"
-|           |-- voices.rs         # tts voices --list
-|           +-- ...
-|
-|-- backend/                      # Backend proxy server
-|   +-- src/
-|       |-- main.rs
-|       |-- api/                  # HTTP endpoints
-|       |-- tts/                  # TTS provider integrations
-|       +-- proxy/                # Multi-backend proxy
-|
-|-- scripting/                    # Scripting/test interface
-|   +-- src/
-|       |-- lib.rs                # Scripting API
-|       +-- scenarios/            # Scenario test implementations
-|           |-- s001_basic_tts.rs
-|           +-- ...
-|   +-- tests/
-|       +-- integration.rs
-|
-|-- ui-app/                       # Production Yew application
-|   +-- src/
-|       |-- main.rs
-|       |-- app.rs
-|       |-- routes.rs
-|       +-- components/
-|
-|-- ui-lab/                       # Scenario harness UIs
-|   |-- src/
-|   |   |-- main.rs               # Router + ?scenario=...
-|   |   +-- scenarios/
-|   |       |-- s001_basic_tts.rs
-|   |       +-- ...
-|   +-- static/
-|       +-- index.html
-|
-|-- e2e/                          # Playwright test suite
+|-- e2e/                                  # Playwright test suite
 |   |-- package.json
 |   |-- playwright.config.ts
 |   +-- tests/
 |       |-- s001_basic_tts.spec.ts
-|       +-- ...
+|       +-- s002_voice_select.spec.ts
 |
 |-- docs/
-|   |-- architecture.md           # This file
-|   |-- prd.md                    # Product requirements
-|   |-- design.md                 # Design decisions
-|   |-- plan.md                   # Implementation plan
-|   |-- status.md                 # Current status
-|   |-- scenarios.md              # Scenario manifest
-|   |-- ports.md                  # Port assignments
-|   +-- ai_playbook.md            # AI agent guidelines
+|   |-- architecture.md                   # This file
+|   |-- prd.md
+|   |-- design.md
+|   |-- plan.md
+|   |-- status.md
+|   +-- scenarios.md
 |
 +-- scripts/
-    |-- run_backend.sh
-    |-- run_ui_lab.sh
-    |-- run_tests.sh
-    +-- run_e2e.sh
+    |-- fmt.sh              # Run cargo fmt on all components
+    |-- clippy.sh           # Run cargo clippy on all components
+    |-- build.sh            # Build all components
+    |-- test.sh             # Test all components
+    |-- check.sh            # Run sw-checklist on all components
+    |-- run_backend.sh      # Start backend server (port 1100)
+    |-- run_ui_lab.sh       # Start UI lab (port 1101)
+    +-- run_e2e.sh          # Run Playwright E2E tests
 ```
+
+### Root Scripts
+
+All root scripts iterate over components in `components/` directory:
+
+```bash
+# scripts/fmt.sh
+#!/bin/bash
+set -euo pipefail
+for component in components/*/; do
+    echo "=== Formatting $component ==="
+    (cd "$component" && cargo fmt --all)
+done
+
+# scripts/clippy.sh
+#!/bin/bash
+set -euo pipefail
+for component in components/*/; do
+    echo "=== Clippy $component ==="
+    (cd "$component" && cargo clippy --all-targets --all-features -- -D warnings)
+done
+
+# scripts/build.sh
+#!/bin/bash
+set -euo pipefail
+for component in components/*/; do
+    echo "=== Building $component ==="
+    (cd "$component" && cargo build --all-targets)
+done
+
+# scripts/test.sh
+#!/bin/bash
+set -euo pipefail
+for component in components/*/; do
+    echo "=== Testing $component ==="
+    (cd "$component" && cargo test --all-targets)
+done
+
+# scripts/check.sh
+#!/bin/bash
+set -euo pipefail
+for component in components/*/; do
+    echo "=== Checking $component ==="
+    sw-checklist "$component"
+done
+```
+
+### Component Summary
+
+| Component   | Purpose                              | Crates                                    |
+|-------------|--------------------------------------|-------------------------------------------|
+| backend     | TTS proxy server                     | backend-api, backend-proxy, backend-tts   |
+| cli         | Command-line interface               | cli-app, cli-commands                     |
+| core        | Shared types and client              | core-types, core-client, core-error, core-scenarios |
+| mocks       | Mock implementations for testing     | mock-backend, mock-tts                    |
+| scripting   | Programmatic test interface          | scripting-api                             |
+| spies       | Test verification                    | spy-api                                   |
+| tests       | Integration tests                    | test-scenarios, test-harness              |
+| web-ui      | Browser-based UI                     | ui-components, ui-lab, ui-app             |
 
 ## Port Assignments
 

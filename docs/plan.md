@@ -7,67 +7,164 @@ This document outlines the phased implementation plan for tts-infra-dev. Each ph
 ## Phase 0: Project Foundation
 
 ### Objectives
-- Set up Cargo workspace structure
-- Establish development tooling
-- Create initial documentation
+- Set up component-based directory structure
+- Create root scripts for build/test/lint
+- Establish code organization patterns
 
 ### Tasks
 
-- [ ] Create workspace Cargo.toml with member crates
-- [ ] Set up core crate (shared types, client, scenarios)
-- [ ] Set up cli crate with clap
-- [ ] Set up backend crate with basic structure
-- [ ] Set up scripting crate with test harness
-- [ ] Configure clippy, rustfmt, and pre-commit checks
+**Directory Structure**
+- [ ] Create components/ directory
+- [ ] Create components/core/ with Cargo.toml workspace
+- [ ] Create components/cli/ with Cargo.toml workspace
+- [ ] Create components/backend/ with Cargo.toml workspace
+- [ ] Create components/scripting/ with Cargo.toml workspace
+- [ ] Create components/mocks/ with Cargo.toml workspace
+- [ ] Create components/tests/ with Cargo.toml workspace
+
+**Root Scripts**
+- [ ] Create scripts/fmt.sh (format all components)
+- [ ] Create scripts/clippy.sh (lint all components)
+- [ ] Create scripts/build.sh (build all components)
+- [ ] Create scripts/test.sh (test all components)
+- [ ] Create scripts/check.sh (sw-checklist all components)
+
+**Core Component Crates**
+- [ ] Create components/core/crates/core-types/
+- [ ] Create components/core/crates/core-error/
+- [ ] Create components/core/crates/core-client/
+- [ ] Create components/core/crates/core-scenarios/
+
+**Documentation**
 - [ ] Create docs/scenarios.md template
-- [ ] Create docs/ports.md with port assignments (110x range)
-- [ ] Add .gitignore for Rust/WASM artifacts
+- [ ] Update .gitignore for multi-component structure
 
 ### Deliverables
-- Compilable workspace with empty crates
-- Three-interface structure established (core, cli, scripting)
-- Development process documented
-- CI-ready project structure
+- All component workspaces compile (empty)
+- Root scripts work across all components
+- sw-checklist passes on all components
+- Component structure matches architecture.md
 
 ---
 
-## Phase 1: Core API and Backend
+## Phase 1: Core Types and Client
 
 ### Objectives
-- Implement core types and client
-- Implement backend API endpoints
-- Establish three-interface pattern with S001
+- Implement core-types crate with request/response types
+- Implement core-error crate with error types
+- Implement core-client crate with API client
+- Follow sw-checklist limits strictly
 
 ### Tasks
 
-**Core (core/)**
-- [ ] Define SynthesizeRequest/Response types
-- [ ] Implement Client with health() and synthesize() methods
-- [ ] Create S001 scenario function
-- [ ] Add error types
+**core-types crate** (components/core/crates/core-types/)
+- [ ] Create src/lib.rs (re-exports only)
+- [ ] Create src/request/mod.rs, src/request/synthesize.rs
+- [ ] Create src/response/mod.rs, src/response/synthesize.rs, src/response/voice.rs
+- [ ] Verify: <=4 modules, <=4 functions per module, <=25 LOC per function
 
-**Backend (backend/)**
-- [ ] Implement GET /health endpoint (port 1100)
-- [ ] Implement POST /synthesize with mock TTS
-- [ ] Add basic error handling (ApiError type)
-- [ ] Configure CORS for local development
+**core-error crate** (components/core/crates/core-error/)
+- [ ] Create src/lib.rs (re-exports only)
+- [ ] Create src/error/mod.rs, src/error/api.rs, src/error/client.rs
+- [ ] Implement Error trait, Display, From conversions
 
-**CLI (cli/)**
-- [ ] Implement `tts health` command
-- [ ] Implement `tts synthesize "text"` command
-- [ ] Use core crate for logic
+**core-client crate** (components/core/crates/core-client/)
+- [ ] Create src/lib.rs (re-exports only)
+- [ ] Create src/client/mod.rs, src/client/builder.rs, src/client/methods.rs
+- [ ] Create src/config/mod.rs, src/config/settings.rs
+- [ ] Implement health(), synthesize(), voices() methods
 
-**Scripting (scripting/)**
-- [ ] Create test harness with base_url configuration
-- [ ] Implement S001 Basic TTS scenario test
-- [ ] Validate same logic as CLI
-- [ ] Document S001 in scenarios.md
+**core-scenarios crate** (components/core/crates/core-scenarios/)
+- [ ] Create src/lib.rs (re-exports only)
+- [ ] Create src/s001/mod.rs, src/s001/basic_tts.rs
+- [ ] Implement S001 scenario using core-client
+
+**Validation**
+- [ ] Run sw-checklist on components/core/
+- [ ] Run clippy with -D warnings
+- [ ] All tests pass
 
 ### Deliverables
-- Working /health and /synthesize endpoints
-- CLI commands working: `tts health`, `tts synthesize`
-- S001 scripting test passing
-- Three-interface pattern established
+- core-types, core-error, core-client, core-scenarios crates complete
+- All crates pass sw-checklist (no warnings)
+- S001 scenario implemented in core-scenarios
+
+---
+
+## Phase 1b: Backend API
+
+### Objectives
+- Implement backend component with HTTP endpoints
+- Create mock TTS provider for testing
+
+### Tasks
+
+**backend-api crate** (components/backend/crates/backend-api/)
+- [ ] Create src/lib.rs (re-exports only)
+- [ ] Create src/health/mod.rs, src/health/handler.rs
+- [ ] Create src/synthesize/mod.rs, src/synthesize/handler.rs, src/synthesize/validation.rs
+- [ ] Create src/voices/mod.rs, src/voices/handler.rs
+
+**backend-tts crate** (components/backend/crates/backend-tts/)
+- [ ] Create src/lib.rs (re-exports only)
+- [ ] Create src/provider/mod.rs, src/provider/trait_def.rs
+- [ ] Create src/mock/mod.rs, src/mock/provider.rs (mock implementation)
+
+**Backend Binary**
+- [ ] Create backend-server crate with main.rs
+- [ ] Wire up Axum routes to handlers
+- [ ] Start on port 1100
+
+**Validation**
+- [ ] Run sw-checklist on components/backend/
+- [ ] Backend starts and responds to /health
+
+### Deliverables
+- Backend running on port 1100
+- GET /health, POST /synthesize, GET /voices working
+- Mock TTS provider returns test data
+
+---
+
+## Phase 1c: CLI and Scripting
+
+### Objectives
+- Implement CLI component
+- Implement scripting component for tests
+- Verify three-interface pattern with S001
+
+### Tasks
+
+**cli-commands crate** (components/cli/crates/cli-commands/)
+- [ ] Create src/lib.rs (re-exports only)
+- [ ] Create src/health/mod.rs, src/health/run.rs
+- [ ] Create src/synthesize/mod.rs, src/synthesize/run.rs, src/synthesize/args.rs
+- [ ] Create src/voices/mod.rs, src/voices/run.rs
+
+**cli-app crate** (components/cli/crates/cli-app/)
+- [ ] Create src/main.rs (minimal, uses cli-commands)
+- [ ] Configure clap with subcommands
+- [ ] Verify --help and --version output
+
+**scripting-api crate** (components/scripting/crates/scripting-api/)
+- [ ] Create src/lib.rs (re-exports core-client and core-scenarios)
+- [ ] Create src/runner/mod.rs, src/runner/scenario.rs
+
+**test-scenarios crate** (components/tests/crates/test-scenarios/)
+- [ ] Create src/lib.rs
+- [ ] Create src/s001/mod.rs, src/s001/test.rs
+- [ ] Write integration test for S001
+
+**Validation**
+- [ ] `tts health` command works
+- [ ] `tts synthesize "Hello"` command works
+- [ ] S001 test passes via scripting
+- [ ] All components pass sw-checklist
+
+### Deliverables
+- CLI binary with health, synthesize, voices commands
+- S001 test passing via scripting
+- Three-interface pattern validated
 
 ---
 

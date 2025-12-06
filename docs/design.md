@@ -7,15 +7,100 @@ This document captures key design decisions for tts-infra-dev, providing rationa
 ## Design Principles
 
 1. **Three Interfaces, One API**: CLI, Scripting, and Web UI share a common core
-2. **Scenario Isolation**: Each test scenario is independent with its own entry point
-3. **Scripting First**: Tests use scripting interface; CLI and UI follow same patterns
-4. **AI Ergonomics**: Small contexts, stable selectors, explicit checklists
-5. **Minimal JavaScript**: All business logic in Rust/WASM
-6. **Determinism**: No flaky tests, reproducible state
+2. **Component Isolation**: Each component is a separate workspace with focused crates
+3. **Small Units**: Functions, modules, and crates stay within sw-checklist limits
+4. **Scenario Isolation**: Each test scenario is independent with its own entry point
+5. **Scripting First**: Tests use scripting interface; CLI and UI follow same patterns
+6. **AI Ergonomics**: Small contexts, stable selectors, explicit checklists
+7. **Minimal JavaScript**: All business logic in Rust/WASM
+8. **Determinism**: No flaky tests, reproducible state
 
 ## Key Design Decisions
 
-### DD1: Three Interfaces Architecture
+### DD1: Component-Based Physical Layout
+
+**Decision**: Organize code into components, each with its own Cargo workspace containing focused crates.
+
+**Physical Layout**:
+```
+components/
+  <component>/
+    Cargo.toml                    # Workspace manifest
+    crates/
+      <crate-name>/
+        Cargo.toml                # Crate manifest (edition = "2024")
+        src/
+          lib.rs                  # Re-exports ONLY, no functions
+          <module-name>/
+            mod.rs                # Re-exports ONLY, no functions
+            <file>.rs             # Actual implementation
+```
+
+**Rationale**:
+- Each component is independently buildable and testable
+- Workspace-per-component enables focused work without loading entire codebase
+- Clear physical boundaries prevent accidental coupling
+- AI agents can work on one component without context pollution
+
+**Rules**:
+1. **No functions in lib.rs** - only `pub mod` and `pub use` statements
+2. **No functions in mod.rs** - only `pub mod` and `pub use` statements
+3. **All Cargo.toml use edition = "2024"**
+4. **Crate names prefixed with component** - e.g., `core-types`, `cli-commands`
+
+**Example lib.rs**:
+```rust
+//! Core types for TTS API.
+
+pub mod request;
+pub mod response;
+
+pub use request::SynthesizeRequest;
+pub use response::{SynthesizeResponse, Voice};
+```
+
+**Example mod.rs**:
+```rust
+//! Request types module.
+
+mod synthesize;
+
+pub use synthesize::SynthesizeRequest;
+```
+
+### DD2: sw-checklist Compliance
+
+**Decision**: All code must pass sw-checklist validation with zero warnings.
+
+**Constraints**:
+
+| Metric              | Warn  | Fail  | Strategy                              |
+|---------------------|-------|-------|---------------------------------------|
+| Lines per function  | >25   | >50   | Extract helper functions              |
+| Functions per module| >4    | >7    | Split into multiple files             |
+| Modules per crate   | >4    | >7    | Split into multiple crates            |
+
+**Rationale**:
+- Small functions are easier to understand and test
+- Focused modules have clear responsibilities
+- Limited crate size forces good decomposition
+- AI agents benefit from smaller, focused contexts
+
+**Enforcement**:
+```bash
+# Run on all components
+./scripts/check.sh
+
+# Run on single component
+sw-checklist components/core
+```
+
+**When Limits Are Approached**:
+- 4 functions in module -> consider if next function belongs here
+- 4 modules in crate -> consider if next module needs new crate
+- 25 LOC in function -> look for extraction opportunities
+
+### DD3: Three Interfaces Architecture
 
 **Decision**: Every use case is accessible through three interfaces: CLI, Scripting, and Web UI, all sharing a common `core` crate.
 
@@ -72,7 +157,7 @@ async fn test_s001_basic_tts() {
 }
 ```
 
-### DD2: Separate UI Lab from Production UI
+### DD4: Separate UI Lab from Production UI
 
 **Decision**: Create a dedicated `ui-lab` crate for testing scenarios, separate from the production `ui-app`.
 
@@ -112,7 +197,7 @@ fn lab_root() -> Html {
 }
 ```
 
-### DD3: URL-Based Scenario Selection
+### DD5: URL-Based Scenario Selection
 
 **Decision**: Use query parameters (?scenario=S001) rather than separate HTML files per scenario.
 
@@ -135,7 +220,7 @@ http://localhost:1101/lab?scenario=S001&ai_mode=1
 http://localhost:1101/lab?scenario=S006&backend_down=true
 ```
 
-### DD4: data-testid Convention
+### DD6: data-testid Convention
 
 **Decision**: All interactive UI elements have `data-testid` attributes following a consistent naming scheme.
 
@@ -168,7 +253,7 @@ await page.getByTestId('synthesize-btn').click();
 await expect(page.getByTestId('audio-player')).toBeVisible();
 ```
 
-### DD5: Scenario Manifest as Single Source of Truth
+### DD7: Scenario Manifest as Single Source of Truth
 
 **Decision**: Maintain a `docs/scenarios.md` table that defines all scenarios with their API sequences.
 
@@ -186,7 +271,7 @@ await expect(page.getByTestId('audio-player')).toBeVisible();
 | S002 | Voice Select   | tts synthesize "Hi" --voice=X  | /lab?scenario=S002   | health -> voices -> synth |
 ```
 
-### DD6: Scripting-Based Testing (reqwest)
+### DD8: Scripting-Based Testing (reqwest)
 
 **Decision**: Use Rust's reqwest library for API tests instead of curl scripts or other tools.
 
@@ -233,7 +318,7 @@ pub async fn run_s001_basic_tts(base_url: &str) -> anyhow::Result<()> {
 }
 ```
 
-### DD6: AI Mode Flag
+### DD9: AI Mode Flag
 
 **Decision**: Support an optional `?ai_mode=1` query parameter that simplifies the DOM for AI agent interaction.
 
@@ -271,7 +356,7 @@ fn voice_selector(props: &Props) -> Html {
 }
 ```
 
-### DD8: Multi-Provider Proxy Architecture
+### DD10: Multi-Provider Proxy Architecture
 
 **Decision**: Backend implements a proxy layer that abstracts multiple TTS providers (OpenAI, ElevenLabs, local, etc.).
 
@@ -306,7 +391,7 @@ model = "tts-1"
 api_key_env = "ELEVENLABS_API_KEY"
 ```
 
-### DD9: Shared Core Crate
+### DD11: Shared Core Crate
 
 **Decision**: Create a shared `core` crate for types, client, and scenario logic used across all interfaces.
 
